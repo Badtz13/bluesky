@@ -44,6 +44,7 @@ func (b *BlueskyClient) HandleNewMessage(ctx context.Context, evt *chat.ConvoDef
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to parse message details")
 		return
 	}
+	zerolog.Ctx(ctx).Debug().Str("message_id", msgID).Any("msgData", msgData).Msg("Parsed message details")
 	b.UserLogin.QueueRemoteEvent(&simplevent.Message[any]{
 		EventMeta: simplevent.EventMeta{
 			Type: bridgev2.RemoteEventMessage,
@@ -100,15 +101,24 @@ func (b *BlueskyClient) parseMessageDetails(
 func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data any) (*bridgev2.ConvertedMessage, error) {
 	switch typedData := any(data).(type) {
 	case *chat.ConvoDefs_MessageView:
-		return &bridgev2.ConvertedMessage{
-			Parts: []*bridgev2.ConvertedMessagePart{{
-				Type: event.EventMessage,
-				Content: &event.MessageEventContent{
-					MsgType: event.MsgText,
-					Body:    typedData.Text,
-				},
-			}},
-		}, nil
+		parts := make([]*bridgev2.ConvertedMessagePart,0)
+		textPart := &bridgev2.ConvertedMessagePart{
+			Type: event.EventMessage,
+			Content: &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    typedData.Text,
+			},
+		}
+		if typedData.Embed != nil {
+			
+		}
+		if len(textPart.Content.Body) > 0 {
+			parts = append(parts,textPart)
+		}
+		cm := &bridgev2.ConvertedMessage{
+			Parts: parts,
+		}
+		return cm, nil
 	case *chat.ConvoDefs_DeletedMessageView:
 		return &bridgev2.ConvertedMessage{
 			Parts: []*bridgev2.ConvertedMessagePart{{
