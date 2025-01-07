@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/bluesky-social/indigo/api/chat"
+	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -44,7 +45,6 @@ func (b *BlueskyClient) HandleNewMessage(ctx context.Context, evt *chat.ConvoDef
 		zerolog.Ctx(ctx).Err(err).Msg("Failed to parse message details")
 		return
 	}
-	zerolog.Ctx(ctx).Debug().Str("message_id", msgID).Any("msgData", msgData).Msg("Parsed message details")
 	b.UserLogin.QueueRemoteEvent(&simplevent.Message[any]{
 		EventMeta: simplevent.EventMeta{
 			Type: bridgev2.RemoteEventMessage,
@@ -110,7 +110,11 @@ func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev
 			},
 		}
 		if typedData.Embed != nil {
-			
+			zerolog.Ctx(ctx).Debug().Any("embed", typedData.Embed.EmbedRecord_View.Record).Msg("embed")
+			embedPart, err := blueskyEmbedToMatrix(ctx,portal,intent, typedData.Embed.EmbedRecord_View.Record)
+			if err == nil{
+				parts = append(parts, embedPart)
+			}
 		}
 		if len(textPart.Content.Body) > 0 {
 			parts = append(parts,textPart)
@@ -140,4 +144,39 @@ func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev
 			}},
 		}, nil
 	}
+}
+
+func blueskyEmbedToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, record any) (*bridgev2.ConvertedMessagePart, error) {
+	switch typedRecord := any(record).(type) {
+	case *bsky.EmbedRecord_ViewRecord:
+		content := event.MessageEventContent{
+			MsgType: event.MsgText,
+			Body: recordValueDecoder(typedRecord.Value),
+		}
+		return &bridgev2.ConvertedMessagePart{
+			Content: &content,
+			Type: event.EventMessage,
+		}, nil
+	default:
+		return nil, nil
+	}
+
+
+	// case *bsky.EmbedRecord_ViewNotFound       
+	// case *bsky.EmbedRecord_ViewBlocked        
+	// case *bsky.EmbedRecord_ViewDetached       
+	// case *bsky.FeedDefs_GeneratorView         
+	// case *bsky.GraphDefs_ListView             
+	// case *bsky.LabelerDefs_LabelerView        
+	// case *bsky.GraphDefs_StarterPackViewBasicase
+}
+
+func recordValueDecoder(recordValue any) (string) {
+	switch typedRecordValue := any(recordValue).(type){
+	case *bsky.FeedPost:
+		return typedRecordValue.Text
+	default:
+		return "nil"
+	}
+
 }
