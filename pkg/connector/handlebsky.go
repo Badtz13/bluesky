@@ -19,10 +19,11 @@ package connector
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
-	"github.com/bluesky-social/indigo/api/chat"
 	"github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/api/chat"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
@@ -101,7 +102,7 @@ func (b *BlueskyClient) parseMessageDetails(
 func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, data any) (*bridgev2.ConvertedMessage, error) {
 	switch typedData := any(data).(type) {
 	case *chat.ConvoDefs_MessageView:
-		parts := make([]*bridgev2.ConvertedMessagePart,0)
+		parts := make([]*bridgev2.ConvertedMessagePart, 0)
 		textPart := &bridgev2.ConvertedMessagePart{
 			Type: event.EventMessage,
 			Content: &event.MessageEventContent{
@@ -110,14 +111,14 @@ func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev
 			},
 		}
 		if typedData.Embed != nil {
-			zerolog.Ctx(ctx).Debug().Any("embed", typedData.Embed.EmbedRecord_View.Record).Msg("embed")
-			embedPart, err := blueskyEmbedToMatrix(ctx,portal,intent, typedData.Embed.EmbedRecord_View.Record)
-			if err == nil{
+			// zerolog.Ctx(ctx).Debug().Any("embed", typedData.Embed.EmbedRecord_View.Record).Msg("embed")
+			embedPart, err := blueskyEmbedToMatrix(ctx, portal, intent, typedData.Embed.EmbedRecord_View.Record)
+			if err == nil {
 				parts = append(parts, embedPart)
 			}
 		}
 		if len(textPart.Content.Body) > 0 {
-			parts = append(parts,textPart)
+			parts = append(parts, textPart)
 		}
 		cm := &bridgev2.ConvertedMessage{
 			Parts: parts,
@@ -147,36 +148,40 @@ func convertMessage(ctx context.Context, portal *bridgev2.Portal, intent bridgev
 }
 
 func blueskyEmbedToMatrix(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, record any) (*bridgev2.ConvertedMessagePart, error) {
-	switch typedRecord := any(record).(type) {
-	case *bsky.EmbedRecord_ViewRecord:
-		content := event.MessageEventContent{
-			MsgType: event.MsgText,
-			Body: recordValueDecoder(typedRecord.Value),
-		}
-		return &bridgev2.ConvertedMessagePart{
-			Content: &content,
-			Type: event.EventMessage,
-		}, nil
-	default:
-		return nil, nil
+	if record == nil {
+		zerolog.Ctx(ctx).Warn().Msg("Received nil record in blueskyEmbedToMatrix")
+		return nil, fmt.Errorf("record is nil")
 	}
 
+	switch typedRecord := record.(type) {
+	case *bsky.EmbedRecord_View_Record:
+		content := event.MessageEventContent{
+			MsgType:       event.MsgText,
+			Body:          recordValueDecoder(ctx, typedRecord.EmbedRecord_ViewRecord.Value.Val),
+			FormattedBody: "https://bsky.app/profile/freya.bsky.social/post/3lfb7tow4642l\n<blockquote class=\"discord-embed\" background-color=\"#1185FE\"><p class=\"discord-embed-author\"><img data-mx-emoticon height=\"24\" src=\"https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:5nq3pybl4nnoxfp3ovjy2lh7/bafkreicrukysn6lnd4nrl5nrkamt65hynzglq66obgjfsxyh5ybhnauhem@jpeg\" title=\"Author icon\" alt=\"\">&nbsp;<span><a href=\"https://bsky.app/profile/freya.bsky.social/post/3lfb7tow4642l\">Freya Holmér (@freya.bsky.social)</a></span></p><p class=\"discord-embed-description\"><p>all my kids are on bsky btw!!</p>\n<p>🐈‍⬛ @thor.acegikmo.com<br>\n🥗 @salad.acegikmo.com<br>\n🥪 @toast.acegikmo.com</p></p><table class=\"discord-embed-fields\"><tr><th>Likes</th></tr><tr><td>1037</td></tr></table><p class=\"discord-embed-image\"><img src=\"https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:5nq3pybl4nnoxfp3ovjy2lh7/bafkreicrukysn6lnd4nrl5nrkamt65hynzglq66obgjfsxyh5ybhnauhem@jpeg\" alt=\"\" title=\"Embed image\"></p><p class=\"discord-embed-footer\"><sub><img data-mx-emoticon height=\"20\" src=\"https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:5nq3pybl4nnoxfp3ovjy2lh7/bafkreicrukysn6lnd4nrl5nrkamt65hynzglq66obgjfsxyh5ybhnauhem@jpeg\" title=\"Footer icon\" alt=\"\">&nbsp;<span>Bluesky</span> • <time datetime=\"2025-01-08T22:33:27.859000+00:00\">Wednesday, 8 January 2025 22:33 UTC</time></sub></p></blockquote>",
+			Format:        event.FormatHTML,
+		}
 
-	// case *bsky.EmbedRecord_ViewNotFound       
-	// case *bsky.EmbedRecord_ViewBlocked        
-	// case *bsky.EmbedRecord_ViewDetached       
-	// case *bsky.FeedDefs_GeneratorView         
-	// case *bsky.GraphDefs_ListView             
-	// case *bsky.LabelerDefs_LabelerView        
-	// case *bsky.GraphDefs_StarterPackViewBasicase
+		return &bridgev2.ConvertedMessagePart{
+			Content: &content,
+			Type:    event.EventMessage,
+		}, nil
+
+	default:
+		zerolog.Ctx(ctx).Warn().Any("record", record).Msg("Unhandled record type in blueskyEmbedToMatrix")
+		return nil, fmt.Errorf("unhandled record type: %T", record)
+	}
 }
 
-func recordValueDecoder(recordValue any) (string) {
-	switch typedRecordValue := any(recordValue).(type){
+func recordValueDecoder(ctx context.Context, recordValue any) string {
+	zerolog.Ctx(ctx).Debug().Str("Concrete Type", reflect.TypeOf(recordValue).String()).Msg("Concrete Type of recordValue")
+	switch typedRecordValue := any(recordValue).(type) {
 	case *bsky.FeedPost:
+		zerolog.Ctx(ctx).Debug().Any("TYPE", typedRecordValue.Embed.EmbedImages.Images[0].Image.Ref.String()).Msg("TYPE")
 		return typedRecordValue.Text
 	default:
-		return "nil"
+		zerolog.Ctx(ctx).Debug().Any("TYPE", typedRecordValue).Msg("TYPE")
+		return "not parsed"
 	}
 
 }
